@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30320.27
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vsLGhost", "vsLGhost.vcxproj", "{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Debug|x64.ActiveCfg = Debug|x64
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Debug|x64.Build.0 = Debug|x64
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Debug|x86.ActiveCfg = Debug|Win32
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Debug|x86.Build.0 = Debug|Win32
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Release|x64.ActiveCfg = Release|x64
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Release|x64.Build.0 = Release|x64
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Release|x86.ActiveCfg = Release|Win32
+		{5BF5055E-4411-49B2-9206-0B3B4B83FE3D}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A3AA0D64-D39D-46D4-ABB2-48FC1A23AB3E}
+	EndGlobalSection
+EndGlobal
