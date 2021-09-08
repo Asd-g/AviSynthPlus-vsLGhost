@@ -1,18 +1,22 @@
-# Description
+## Description
 
 Luminance Ghost reduction filter. Can be used for removing luminance ghost or edge ghost (ringing).
 
 This is [a port of the VapourSynth plugin LGhost](https://github.com/HomeOfVapourSynthEvolution/VapourSynth-LGhost).
 
-AviSynth+ >=3.6 required in order to use this filter.
+### Requirements:
 
-# Usage
+- AviSynth+ 3.6 or later
+
+- Microsoft VisualC++ Redistributable Package 2022 (can be downloaded from [here](https://github.com/abbodi1406/vcredist/releases))
+
+### Usage:
 
 ```
 vsLGhost (clip, int[] mode, int[] shift, int[] intensity, int "y", int "u", int "v", int "opt")
 ```
 
-## Parameters:
+### Parameters:
 
 - clip\
     A clip to process. All planar formats are supported.
