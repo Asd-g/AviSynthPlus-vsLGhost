@@ -5,7 +5,7 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the build type" FORCE)
 endif()
 
-project(vsLGhost VERSION 1.0.0 LANGUAGES CXX)
+project(vsLGhost VERSION 1.0.1 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(AvisynthPlus REQUIRED)
@@ -20,7 +20,7 @@ add_library(${PROJECT_NAME} MODULE
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
+target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE AvisynthPlus::headers)
 
@@ -28,8 +28,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     target_link_libraries(${PROJECT_NAME} PRIVATE "libmmds")
 endif()
 
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/vsLGhost_AVX2.cpp" PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:mavx2;-mfma>")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/vsLGhost_AVX512.cpp" PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX512>$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:mavx512f;-mavx512bw;-mavx512dq;-mavx512vl;-mavx512cd;-mfma>")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/vsLGhost_AVX2.cpp" PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-mavx2;-mfma>")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/vsLGhost_AVX512.cpp" PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX512>$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-mavx512f;-mavx512bw;-mavx512dq;-mavx512vl;-mavx512cd;-mfma>")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     target_compile_options(${PROJECT_NAME} PRIVATE "/fp:precise")

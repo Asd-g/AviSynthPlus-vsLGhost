@@ -59,7 +59,7 @@ Each ghost consists of individual value from mode, shift and intensity. For exam
 #### Prerequisites
 - **Git**
 - **CMake** >= 3.28
-- A **C++17 capable compiler**
+- A **C++20 capable compiler** (e.g., Visual Studio 2022, GCC 11+, Clang 12+)
 
 1.  Clone the repository:
 

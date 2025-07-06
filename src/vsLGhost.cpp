@@ -5,16 +5,14 @@
 #include "vsLGhost.h"
 
 template<typename pixel_t>
-void vsLGhost::filter_c(PVideoFrame& src, PVideoFrame& dst, const vsLGhost* const __restrict, IScriptEnvironment* env) noexcept
+void vsLGhost::filter_c(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) noexcept
 {
     using var_t = std::conditional_t<std::is_integral_v<pixel_t>, int, float>;
 
-    var_t* buffer = reinterpret_cast<var_t*>(vsLGhost::buffer);
-
-    int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
-    int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
+    constexpr int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
+    constexpr int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
     const int* current_planes = (vi.IsYUV() || vi.IsYUVA()) ? planes_y : planes_r;
-    const int planecount = std::min(vi.NumComponents(), 3);
+
     for (int i = 0; i < planecount; i++)
     {
         const int plane = current_planes[i];
@@ -25,10 +23,11 @@ void vsLGhost::filter_c(PVideoFrame& src, PVideoFrame& dst, const vsLGhost* cons
             const int width = src->GetRowSize(plane) / sizeof(pixel_t);            
             const pixel_t* srcp = reinterpret_cast<const pixel_t*>(src->GetReadPtr(plane));
             pixel_t* __restrict dstp = reinterpret_cast<pixel_t*>(dst->GetWritePtr(plane));
+            var_t* buffer = reinterpret_cast<var_t*>(vsLGhost::buffer_plane[i].get());
 
             for (int y = 0; y < height; y++)
             {
-                memset(buffer, 0, width * sizeof(var_t));
+                std::memset(buffer, 0, width * sizeof(var_t));
 
                 for (auto&& it : options[i][0])
                     for (int x = it.startX; x < it.endX; x++)
@@ -65,8 +64,37 @@ void vsLGhost::filter_c(PVideoFrame& src, PVideoFrame& dst, const vsLGhost* cons
     }
 }
 
-vsLGhost::vsLGhost(PClip _child, const std::vector<int>& mode, const std::vector<int>& shift, const std::vector<int>& intensity, int y, int u, int v, int opt, IScriptEnvironment* env)
-    : GenericVideoFilter(_child), mode_(mode), shift_(shift), intensity_(intensity), opt_(opt)
+vsLGhost::vsLGhost(PClip _child, std::vector<int> mode, std::vector<int> shift, std::vector<int> intensity, int y, int u, int v, int opt, IScriptEnvironment* env)
+    : GenericVideoFilter(_child), mode_(std::move(mode)), shift_(std::move(shift)), intensity_(std::move(intensity)),
+    process([&] {return vi.IsRGB() ? std::array<int, 3>{3, 3, 3} : std::array<int, 3>{ y, u, v }; } ()),
+    peak((vi.ComponentSize() != 4) ? ((1 << vi.BitsPerComponent()) - 1) : 0),
+    has_at_least_v8(env->FunctionExists("propShow")),
+    planecount(std::min(vi.NumComponents(), 3)),
+
+    plane_width([&]() {
+    std::array<int, 3> widths{};
+    const int width_subs = (!vi.IsRGB() && planecount > 1) ? vi.GetPlaneWidthSubsampling(PLANAR_U) : 0;
+
+    for (int i = 0; i < planecount; ++i)
+        widths[i] = i ? (vi.width >> width_subs) : vi.width;
+
+    return widths;
+        }()),
+
+    buffer_plane([&] {
+    std::array<aligned_unique_ptr<std::byte>, 3> bufs;
+
+    for (int i = 0; i < planecount; ++i)
+    {
+        const size_t buffer_size = (plane_width[i] + 15) * sizeof(int);
+        bufs[i] = make_unique_aligned_array<std::byte>(buffer_size, 64);
+
+        if (!bufs[i])
+            env->ThrowError("vsLGhost: allocation failure (buffer %d).", i);
+    }
+
+    return bufs;
+        }())
 {
     if (!vi.IsPlanar())
         env->ThrowError("vsLGhost: the clip is not in planar format.");
@@ -77,23 +105,6 @@ vsLGhost::vsLGhost(PClip _child, const std::vector<int>& mode, const std::vector
 
     if (num_mode != num_shift || num_mode != num_intensity)
         env->ThrowError("vsLGhost: the number of the elements in mode, shift and intensity must be equal.");
-
-    int planes[3] = { y, u, v };
-    const int planecount = std::min(vi.NumComponents(), 3);
-    for (int i = 0; i < planecount; i++)
-    {
-        if (vi.IsRGB())
-            process[i] = 3;
-        else
-        {
-            switch (planes[i])
-            {
-                case 3: process[i] = 3; break;
-                case 2: process[i] = 2; break;
-                default: process[i] = 1; break;
-            }
-        }
-    }
 
     for (int i = 0; i < num_mode; ++i)
     {
@@ -107,7 +118,7 @@ vsLGhost::vsLGhost(PClip _child, const std::vector<int>& mode, const std::vector
         {
             if (process[plane] == 3)
             {
-                int width = vi.width >> (plane && !vi.IsRGB() ? vi.GetPlaneWidthSubsampling(PLANAR_U) : 0);
+                int width = plane_width[plane];
 
                 if (std::abs(shift_[i]) >= width)
                     env->ThrowError("vsLGhost: abs(shift) must be less than plane's width.");
@@ -129,31 +140,58 @@ vsLGhost::vsLGhost(PClip _child, const std::vector<int>& mode, const std::vector
         }
     }
 
-    if (opt_ < -1 || opt_ > 3)
+    const int cpu_instrucs = !(!!(env->GetCPUFlags() & CPUF_AVX512F) && (opt < 0 || opt == 3))
+                                   ? !(!!(env->GetCPUFlags() & CPUF_AVX2) && (opt < 0 || opt == 2))
+                                         ? !(!!(env->GetCPUFlags() & CPUF_SSE2) && (opt < 0 || opt == 1)) ? 0 : 1
+                                         : 2
+                                   : 3;
+
+    if (opt < -1 || opt > 3)
         env->ThrowError("vsLGhost: opt must be between -1..3.");
-    if (!(env->GetCPUFlags() & CPUF_AVX512F) && opt_ == 3)
+    if (opt == 3 && cpu_instrucs != 3)
         env->ThrowError("vsLGhost: opt=3 requires AVX512F.");
-    if (!(env->GetCPUFlags() & CPUF_AVX2) && opt_ == 2)
+    if (opt == 2 && cpu_instrucs != 2)
         env->ThrowError("vsLGhost: opt=2 requires AVX2.");
-    if (!(env->GetCPUFlags() & CPUF_SSE2) && opt_ == 1)
+    if (opt == 1 && cpu_instrucs != 1)
         env->ThrowError("vsLGhost: opt=1 requires SSE2.");
 
-    peak = 0;
-    if (vi.ComponentSize() != 4)
-        peak = (1 << vi.BitsPerComponent()) - 1;
-
-    buffer = _aligned_malloc(static_cast<int64_t>(vi.width) * vi.height * vi.ComponentSize() * sizeof(int), 64);
-    if (!buffer)
-        env->ThrowError("vsLGhost: malloc failure (buffer).");
-
-    has_at_least_v8 = true;
-    try { env->CheckVersion(8); }
-    catch (const AvisynthError&) { has_at_least_v8 = false; }
-}
-
-vsLGhost::~vsLGhost()
-{
-    _aligned_free(buffer);
+    switch (cpu_instrucs)
+    {
+    case 3:
+        switch (vi.ComponentSize())
+        {
+        case 1: filter_ptr = &vsLGhost::filter_avx512<uint8_t>; break;
+        case 2: filter_ptr = &vsLGhost::filter_avx512<uint16_t>; break;
+        default: filter_ptr = &vsLGhost::filter_avx512<float>; break;
+        }
+        break;
+    case 2:
+        switch (vi.ComponentSize())
+        {
+        case 1: filter_ptr = &vsLGhost::filter_avx2<uint8_t>; break;
+        case 2: filter_ptr = &vsLGhost::filter_avx2<uint16_t>; break;
+        default: filter_ptr = &vsLGhost::filter_avx2<float>; break;
+        }
+        break;
+    case 1:
+        switch (vi.ComponentSize())
+        {
+        case 1: filter_ptr = &vsLGhost::filter_sse2<uint8_t>; break;
+        case 2: filter_ptr = &vsLGhost::filter_sse2<uint16_t>; break;
+        default: filter_ptr = &vsLGhost::filter_sse2<float>; break;
+        }
+        break;
+    case 0:
+        switch (vi.ComponentSize())
+        {
+        case 1: filter_ptr = &vsLGhost::filter_c<uint8_t>; break;
+        case 2: filter_ptr = &vsLGhost::filter_c<uint16_t>; break;
+        default: filter_ptr = &vsLGhost::filter_c<float>; break;
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 PVideoFrame __stdcall vsLGhost::GetFrame(int n, IScriptEnvironment* env)
@@ -161,77 +199,52 @@ PVideoFrame __stdcall vsLGhost::GetFrame(int n, IScriptEnvironment* env)
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame dst = has_at_least_v8 ? env->NewVideoFrameP(vi, &src) : env->NewVideoFrame(vi);
 
-    if ((!!(env->GetCPUFlags() & CPUF_AVX512F) && opt_ < 0) || opt_ == 3)
-    {
-        switch (vi.ComponentSize())
-        {
-            case 1: filter_avx512<uint8_t>(src, dst, 0, env); break;
-            case 2: filter_avx512<uint16_t>(src, dst, 0, env); break;
-            default: filter_avx512<float>(src, dst, 0, env); break;
-        }
-    }
-    else if ((!!(env->GetCPUFlags() & CPUF_AVX2) && opt_ < 0) || opt_ == 2)
-    {
-        switch (vi.ComponentSize())
-        {
-            case 1: filter_avx2<uint8_t>(src, dst, 0, env); break;
-            case 2: filter_avx2<uint16_t>(src, dst, 0, env); break;
-            default: filter_avx2<float>(src, dst, 0, env); break;
-        }
-    }
-    else if ((!!(env->GetCPUFlags() & CPUF_SSE2) && opt_ < 0) || opt_ == 1)
-    {
-        switch (vi.ComponentSize())
-        {
-            case 1: filter_sse2<uint8_t>(src, dst, 0, env); break;
-            case 2: filter_sse2<uint16_t>(src, dst, 0, env); break;
-            default: filter_sse2<float>(src, dst, 0, env); break;
-        }
-    }
-    else
-    {
-        switch (vi.ComponentSize())
-        {
-            case 1: filter_c<uint8_t>(src, dst, 0, env); break;
-            case 2: filter_c<uint16_t>(src, dst, 0, env); break;
-            default: filter_c<float>(src, dst, 0, env); break;
-        }
-    }
+    (this->*filter_ptr)(src, dst, env);
 
     return dst;
 }
 
 AVSValue __cdecl Create_vsLGhost(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-    std::vector<int> mode;
-
-    for (int i = 0; i < args[1].ArraySize(); ++i)
+    enum class Args_num
     {
-        mode.push_back(args[1][i].AsInt());
-    }
+        Clip = 0,
+        Mode,
+        Shift,
+        Intensity,
+        Y,
+        U,
+        V,
+        Opt
+    };
 
-    std::vector<int> shift;
-    for (int i = 0; i < args[2].ArraySize(); ++i)
-    {
-        shift.push_back(args[2][i].AsInt());
-    }
+    const int mode_num = args[static_cast<int>(Args_num::Mode)].ArraySize();
+    std::vector<int> mode(mode_num);
+    const int shif_num = args[static_cast<int>(Args_num::Shift)].ArraySize();
+    std::vector<int> shift(shif_num);
+    const int intensity_num = args[static_cast<int>(Args_num::Intensity)].ArraySize();
+    std::vector<int> intensity(intensity_num);
 
-    std::vector<int> intensity;
-    for (int i = 0; i < args[3].ArraySize(); ++i)
-    {
-        intensity.push_back(args[3][i].AsInt());
-    }
+    for (int i = 0; i < mode_num; ++i)
+        mode[i] = args[static_cast<int>(Args_num::Mode)][i].AsInt();
 
+    for (int i = 0; i < shif_num; ++i)
+        shift[i] = args[static_cast<int>(Args_num::Shift)][i].AsInt();
+    
+    for (int i = 0; i < intensity_num; ++i)
+        intensity[i] = args[static_cast<int>(Args_num::Intensity)][i].AsInt();
+
+    const int u = args[static_cast<int>(Args_num::U)].AsInt(2);
 
     return new vsLGhost(
         args[0].AsClip(),
-        mode,
-        shift,
-        intensity,
-        args[4].AsInt(3),
-        args[5].AsInt(2),
-        args[6].AsInt(2),
-        args[7].AsInt(-1),
+        std::move(mode),
+        std::move(shift),
+        std::move(intensity),
+        args[static_cast<int>(Args_num::Y)].AsInt(3),
+        u,
+        args[static_cast<int>(Args_num::V)].AsInt(u),
+        args[static_cast<int>(Args_num::Opt)].AsInt(-1),
         env);
 }
 
