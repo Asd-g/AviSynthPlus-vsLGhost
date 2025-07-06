@@ -1,14 +1,13 @@
-#include "vsLGhost.h"
 #include "VCL2/vectorclass.h"
+#include "vsLGhost.h"
 
 template<typename pixel_t>
-void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) noexcept
+void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) const noexcept
 {
     using var_t = std::conditional_t<std::is_integral_v<pixel_t>, int, float>;
     using vec_t = std::conditional_t<std::is_integral_v<pixel_t>, Vec8i, Vec8f>;
 
-    auto load = [](const pixel_t* srcp) noexcept
-    {
+    auto load = [](const pixel_t* AVS_RESTRICT srcp) noexcept {
         if constexpr (std::is_same_v<pixel_t, uint8_t>)
             return vec_t().load_8uc(srcp);
         else if constexpr (std::is_same_v<pixel_t, uint16_t>)
@@ -17,8 +16,7 @@ void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironmen
             return vec_t().load(srcp);
     };
 
-    auto store = [&](const vec_t srcp, const vec_t buffer, pixel_t* dstp) noexcept
-    {
+    auto store = [&](const vec_t srcp, const vec_t buffer, pixel_t* AVS_RESTRICT dstp) noexcept {
         if constexpr (std::is_same_v<pixel_t, uint8_t>)
         {
             const auto result = compress_saturated_s2u(compress_saturated(srcp + (buffer >> 7), zero_si256()), zero_si256()).get_low();
@@ -36,8 +34,8 @@ void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironmen
         }
     };
 
-    constexpr int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
-    constexpr int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
+    constexpr int planes_y[4] = {PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A};
+    constexpr int planes_r[4] = {PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A};
     const int* current_planes = (vi.IsYUV() || vi.IsYUVA()) ? planes_y : planes_r;
 
     for (int i = 0; i < planecount; i++)
@@ -49,8 +47,8 @@ void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironmen
         {
             const int width = src->GetRowSize(plane) / sizeof(pixel_t);
             const pixel_t* _srcp = reinterpret_cast<const pixel_t*>(src->GetReadPtr(plane));
-            pixel_t* __restrict dstp = reinterpret_cast<pixel_t*>(dst->GetWritePtr(plane));
-            var_t* buffer_row = reinterpret_cast<var_t*>(vsLGhost::buffer_plane[i].get());            
+            pixel_t* AVS_RESTRICT dstp = reinterpret_cast<pixel_t*>(dst->GetWritePtr(plane));
+            var_t* AVS_RESTRICT buffer_row = reinterpret_cast<var_t*>(buffer_plane[i].get());
 
             const int regularPart = (width - 1) & ~(vec_t().size() - 1);
 
@@ -145,15 +143,16 @@ void vsLGhost::filter_avx2(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironmen
                     store(srcp, buffer, dstp + x);
                 }
 
-                _srcp += src->GetPitch(plane) / sizeof(pixel_t);;
+                _srcp += src->GetPitch(plane) / sizeof(pixel_t);
                 dstp += dst->GetPitch(plane) / sizeof(pixel_t);
             }
         }
         else if (process[i] == 2)
-            env->BitBlt(dst->GetWritePtr(plane), dst->GetPitch(plane), src->GetReadPtr(plane), src->GetPitch(plane), src->GetRowSize(plane), height);
+            env->BitBlt(dst->GetWritePtr(plane), dst->GetPitch(plane), src->GetReadPtr(plane), src->GetPitch(plane), src->GetRowSize(plane),
+                height);
     }
 }
 
-template void vsLGhost::filter_avx2<uint8_t>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) noexcept;
-template void vsLGhost::filter_avx2<uint16_t>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) noexcept;
-template void vsLGhost::filter_avx2<float>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) noexcept;
+template void vsLGhost::filter_avx2<uint8_t>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) const noexcept;
+template void vsLGhost::filter_avx2<uint16_t>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) const noexcept;
+template void vsLGhost::filter_avx2<float>(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment* env) const noexcept;
